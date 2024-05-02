@@ -1,0 +1,15 @@
+## Vision Encoder
+    - Single Image
+    - Single -> Multiple Image    
+        - Using LLAVA-UHD
+        - Using LLAVA-UHD + positional encoding 
+        - Using LLAVA-UHD + positional encoding + learned
+        - Using LLAVA-UHD - use , and \n to sepparate images
+    - Multiple Images
+    - Multiple -> Multiple Images
+        - Using LLAVA-UHD
+        - Using LLAVA-UHD + positional encoding 
+        - Using LLAVA-UHD + positional encoding + learned
+        - Using LLAVA-UHD - use , and \n to sepparate images
+
+Multiplicative Interaction between text and query
