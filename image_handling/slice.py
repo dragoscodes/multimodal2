@@ -61,8 +61,6 @@ def split_image(image_file):
     slices = []
     slice_width = width // num_slices_w
     slice_height = height // num_slices_h
-    print("Image height:", height, "Image width:", width)
-    print("Slice height:", slice_height, "Slice width:", slice_width)  
     for y in range(0, height - slice_height + 1, slice_height):
         for x in range(0, width - slice_width + 1, slice_width):
             box = (x, y, x + slice_width , y + slice_height)
@@ -73,6 +71,17 @@ def split_image(image_file):
             slices.append(resized_slice)
 
     return slices , num_slices_h, num_slices_w 
+
+def split_image_tensor(image_tensor):
+    #split the image without transforming it to image, just pure tensor operations
+    slices = []
+
+    width , height = image_tensor.shape[-1], image_tensor.shape[-2]
+
+    slice_width = IMAGE_WIDTH // PATCH_NUM_WIDTH
+    slice_height = IMAGE_HEIGHT // PATCH_NUM_HEIGHT
+    num_slices_w, num_slices_h = cal_num_of_slices(width, height)
+
 
 def get_positional_encoding(max_seq_len, embedding_dim):
     position_encoding = torch.zeros(max_seq_len, embedding_dim)

@@ -1,9 +1,4 @@
-from torch import nn
+from learned_model import LearnedPositionalEncoding
 
-def load_learned_encoding(vision_dim, llm_dim, option):
-    if(option == 'linear'):
-        return nn.Sequential(
-            nn.Linear(vision_dim, llm_dim)
-        )
-    else:
-        raise ValueError(f'Unexpected learned encoding type: {option}')
+def load_learned_positional(max_len, d_model):
+    return LearnedPositionalEncoding(max_len, d_model)

@@ -9,22 +9,20 @@ def load_vision_model(pretrained_model, device = "cpu", cache_dir = None ):
     image_processor = CLIPImageProcessor.from_pretrained(pretrained_model,  cache_dir=cache_dir)
     return vision_model , image_processor;
 
-def load_llm(pretrained_model, device = "cpu", cache_dir = None , quantization_config = None):
-    llm = AutoModelForCausalLM.from_pretrained(pretrained_model,  cache_dir=cache_dir, quantization_config = None)
+def load_llm(pretrained_model, device = "cpu", cache_dir = None , quantization_config = None , attn_implementation = "flash_attention_2"):
+    llm = AutoModelForCausalLM.from_pretrained(pretrained_model,  cache_dir=cache_dir, quantization_config = quantization_config, attn_implementation = attn_implementation)
     llm.share_memory()
     tokenizer = AutoTokenizer.from_pretrained(pretrained_model, cache_dir=cache_dir )
     return llm, tokenizer
 
 def load_model_and_tokenizer(
-    model_path, tokenizer_path=None, device="cuda", dtype=torch.bfloat16, access_token=None, **kwargs
+    model_path, tokenizer_path=None, device="cuda", access_token=None, **kwargs
 ):
     model = (
         AutoModelForCausalLM.from_pretrained(
             model_path,
-            torch_dtype=dtype,
             trust_remote_code=True,
             attn_implementation="flash_attention_2",
-            token=access_token,
             do_sample=True,
             temperature=0.6,
             top_p=0.9,
@@ -55,3 +53,6 @@ def load_model_and_tokenizer(
             tokenizer.pad_token = tokenizer.eos_token
 
     return model, tokenizer
+
+# wget https://github.com/Dao-AILab/flash-attention/releases/download/v2.5.8/flash_attn-2.5.8+cu122torch2.2cxx11abiTRUE-cp310-cp310-linux_x86_64.whl
+

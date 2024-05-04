@@ -3,7 +3,7 @@ from transformers import PreTrainedModel
 from loader.model_loader import load_vision_model, load_llm
 from vision.projector import load_vision_projector
 from vision.feature_select import feature_select
-from vision.learned_encoding import load_learned_encoding
+from vision.learned_encoding import load_learned_positional
 from image_handling.padding import resize_with_padding, load_images
 from image_handling.slice import split_image
 from transformers import BitsAndBytesConfig
@@ -24,6 +24,7 @@ class LeMultiModal(PreTrainedModel):
 
     def __init__(self, config):
         super().__init__(config)
+        self.max_len = 8
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.quantization_config = BitsAndBytesConfig(load_in_8bit=True, bnb_4bit_compute_dtype=torch.bfloat16)
         self.vision_model , self.image_processor = load_vision_model("laion/CLIP-ViT-H-14-laion2B-s32B-b79K", device = self.device )
@@ -31,7 +32,16 @@ class LeMultiModal(PreTrainedModel):
         self.vision_projector = load_vision_projector()
         self.llm_dim = self.llm.config.hidden_size
         self.vision_dim = self.vision_model.config.hidden_size
-        self.learned_positional = load_learned_encoding(self.vision_dim, self.llm_dim, "linear")
+        self.learned_positional = load_learned_positional(self.max_len, )
+        self.uhd_sepparators = self.get_token_embeddings(["\n", ","])
+
+    def get_token_embeddings(self, text):
+        input_ids = self.tokenizer(text).input_ids
+
+        with torch.no_grad():  # Optionally disable gradient calculation
+            embeddings = self.llm.get_input_embeddings()(torch.tensor(input_ids).to(self.device))
+
+        return embeddings
 
     def get_positional_encoding(max_seq_len, embedding_dim):
         position_encoding = torch.zeros(max_seq_len, embedding_dim)
@@ -41,19 +51,33 @@ class LeMultiModal(PreTrainedModel):
         position_encoding[:, 1::2] = torch.cos(position * div_term)
         return position_encoding
 
-    def prepare(self, inputs, images):
-        if(images is None):
-            return 0
-        images = load_images(images)
+    def processs(self, image, text):
+        #Supports just 1 image for now
+        
+        if "<image>" not in text:
+            #the embedding is just the text
+            new_embeddings = self.get_token_embeddings(text)
+        else:
+            assert text.count("<image>") == 1
+            new_embeddings = self.encode_images_no_positional_encoding(image)
+            before, after = text.split("<image>")
+            if len(before) > 0:
+                new_embeddings = torch.cat((self.get_token_embeddings(before), new_embeddings), dim=0)
+            if len(after) > 0:
+                new_embeddings = torch.cat((new_embeddings, self.get_token_embeddings(after)), dim=0)
 
-    def encode_images_positional_encoding(self, images, padding = True, learned_encoding = True):
-        #make sure all images are already preprocessed 
+        #run the embeddings through the llm and return the result in clear text
+        with torch.no_grad():
+            output = self.llm(new_embeddings.unsqueeze(0))
+            return self.tokenizer.decode(output[0])
+
+    def encode_images_positional_encoding(self, images, padding = True, sinusoidal_encoding = True, learned_encoding = False):
         MAX_LEN = 8
 
         image_tensors = self.image_processor.preprocess(images, return_tensors='pt')['pixel_values'].to(self.device)
         #for the case where there are less than 8 images, add empty tensors
         if(padding):
-            for i in range(8-len(images)):
+            for i in range(MAX_LEN-len(images)):
                 image_tensors = torch.cat((image_tensors, torch.zeros_like(image_tensors[0]).unsqueeze(0)), dim=0)
         
         with torch.no_grad(): 
@@ -61,15 +85,16 @@ class LeMultiModal(PreTrainedModel):
             image_features = batch_features.hidden_states[-1]
             image_features = feature_select(image_features, "patch")
             # Positional Encoding
-            max_seq_len = image_features.shape[1]
-            pos_encoding = self.get_positional_encoding(max_seq_len, image_features.shape[-1]).to(self.device)
-            image_features += pos_encoding
+            if(sinusoidal_encoding):
+                max_seq_len = image_features.shape[1]
+                pos_encoding = self.get_positional_encoding(max_seq_len, image_features.shape[-1]).to(self.device)
+                image_features += pos_encoding
 
-        # Learned Encoding
+        # Learned Positional Encoding
         if learned_encoding:
             image_features += self.learned_encoding_layer(image_features)
 
-            return self.projector(image_features)
+        return self.vision_projector(image_features)
     
     def images_uhd_positional_encoding(self, image):
         #lower the image with padding to 
@@ -80,21 +105,26 @@ class LeMultiModal(PreTrainedModel):
     def imaged_uhd_arranged(self, image):
         resized_image = resize_with_padding(image, 336)
         splits , h , w = split_image(image)
-        #get the embedding of the tokens "," and "\n" from the llm tokenizer
-        tokens = self.tokenizer.tokenize("\n")
-        #get the embedding
-        token_embeddings = self.llm.get_input_embeddings()
-        #get the embedding of the tokens
-        token_embeddings = token_embeddings(torch.tensor(tokens).to(self.device))
 
-        self.encode_images_no_positional_encoding(splits ,padding = False)
+        embeddings = self.encode_images_no_positional_encoding(splits)
+        new_embeddings = []
         for i in range(h):
             for j in range(w):
-                print(f"Image {i*w+j} at position {i},{j}")
+                new_embeddings.append(embeddings[i*w+j])
+                new_embeddings.append(self.uhd_sepparators[1])
+            new_embeddings.append(self.uhd_sepparators[0])
+        
+        return new_embeddings
+                
     
-    def encode_images_no_positional_encoding(self, image):
-        return 0
+    def encode_images_no_positional_encoding(self, image_tensors):
+        with torch.no_grad(): 
+            batch_features = self.vison_model(image_tensors, output_hidden_states=True)
+            image_features = batch_features.hidden_states[-1]
+            image_features = feature_select(image_features, "patch")
+        return self.vision_projector(image_features)
     
+
     # def forward_1image(self, image, text):
     #     #Supports just 1 image for now
     #     if "<image>" not in text:
