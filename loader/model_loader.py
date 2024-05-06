@@ -4,14 +4,15 @@ from transformers import BitsAndBytesConfig , CLIPVisionModel, CLIPImageProcesso
 quantization_config = BitsAndBytesConfig(load_in_8bit=True, bnb_4bit_compute_dtype=torch.bfloat16)
 
 def load_vision_model(pretrained_model, device = "cpu", cache_dir = None ):
-    vision_model = CLIPVisionModel.from_pretrained(pretrained_model, cache_dir=cache_dir).to(device)
-    vision_model.share_memory()
+    vision_model = CLIPVisionModel.from_pretrained(pretrained_model, cache_dir=cache_dir, device=device)
     image_processor = CLIPImageProcessor.from_pretrained(pretrained_model,  cache_dir=cache_dir)
     return vision_model , image_processor;
 
-def load_llm(pretrained_model, device = "cpu", cache_dir = None , quantization_config = None , attn_implementation = "flash_attention_2"):
-    llm = AutoModelForCausalLM.from_pretrained(pretrained_model,  cache_dir=cache_dir, quantization_config = quantization_config, attn_implementation = attn_implementation)
-    llm.share_memory()
+def load_llm(pretrained_model, device = "cpu", cache_dir = None , quantization_config = None , attn_implementation = None):
+    if attn_implementation is None:
+        llm = AutoModelForCausalLM.from_pretrained(pretrained_model,  cache_dir=cache_dir, quantization_config = quantization_config).to(device)
+    else:
+        llm = LlamaForCausalLM.from_pretrained(pretrained_model,  cache_dir=cache_dir, quantization_config = quantization_config, attn_implementation = attn_implementation)
     tokenizer = AutoTokenizer.from_pretrained(pretrained_model, cache_dir=cache_dir )
     return llm, tokenizer
 
